@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package genservice;
+
+service AudioCraftGenService {
+  rpc GetAudioStream (GetAudioStreamRequest) returns (stream GetAudioStreamResponse);
+}
+
+message GetAudioStreamRequest {
+  string prompt = 1;
+}
+
+message GetAudioStreamResponse {
+  string message = 1;
+  string progress = 2;
+}
