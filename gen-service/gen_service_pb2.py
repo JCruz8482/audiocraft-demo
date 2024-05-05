@@ -14,13 +14,14 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11gen-service.proto\x12\ngenservice\"\'\n\x15GetAudioStreamRequest\x12\x0e\n\x06prompt\x18\x01 \x01(\t\";\n\x16GetAudioStreamResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x10\n\x08progress\x18\x02 \x01(\t2q\n\x14\x41udioCraftGenService\x12Y\n\x0eGetAudioStream\x12!.genservice.GetAudioStreamRequest\x1a\".genservice.GetAudioStreamResponse0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11gen-service.proto\x12\ngenservice\"\'\n\x15GetAudioStreamRequest\x12\x0e\n\x06prompt\x18\x01 \x01(\t\";\n\x16GetAudioStreamResponse\x12\x0f\n\x07message\x18\x01 \x01(\t\x12\x10\n\x08progress\x18\x02 \x01(\t2q\n\x14\x41udioCraftGenService\x12Y\n\x0eGetAudioStream\x12!.genservice.GetAudioStreamRequest\x1a\".genservice.GetAudioStreamResponse0\x01\x42\x32Z0github.com/JCruz8482/audiocraft-demo/gen-serviceb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'gen_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
-  DESCRIPTOR._loaded_options = None
+  _globals['DESCRIPTOR']._loaded_options = None
+  _globals['DESCRIPTOR']._serialized_options = b'Z0github.com/JCruz8482/audiocraft-demo/gen-service'
   _globals['_GETAUDIOSTREAMREQUEST']._serialized_start=33
   _globals['_GETAUDIOSTREAMREQUEST']._serialized_end=72
   _globals['_GETAUDIOSTREAMRESPONSE']._serialized_start=74
