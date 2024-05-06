@@ -10,11 +10,16 @@
     <label for="prompt">Enter Prompt:</label><br>
     <input type="text" id="prompt" name="prompt"><br><br>
     <button type="submit">Submit</button>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.5.0/dist/htmx.min.js"></script>
   </form>
 
   <div id="progress"></div>
   <div id="result" style="display:none;"></div>
+  <button hx-post="/stream-audio" hx-target="#audioPlayer" hx-swap="innerHTML">Play Audio</button>
 
+  <div id="audioPlayer">
+    <!-- This will be replaced with the audio player -->
+  </div>
   <script src="/static/main.js"></script>
 </body>
 

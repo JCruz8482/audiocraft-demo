@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	gs "github.com/JCruz8482/audiocraft-demo/demo-service/gen_service"
@@ -22,8 +25,34 @@ func main() {
 		c.File("./static/index.html")
 	})
 	router.GET("/progress", getAudioHandler)
-
 	router.Run("localhost:8080")
+}
+
+func streamAudioHandler(c *gin.Context) {
+	file := "../soul.mp3"
+	audioData, err := os.ReadFile(file)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read audio file")
+		return
+	}
+
+	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
+	htmlResponse := "<audio controls><source src=\"data:audio/mpeg;base64," + audioBase64 + "\" type=\"audio/mpeg\"></audio>"
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, htmlResponse)
+}
+
+func streamAudio(path string, c *gin.Context) string {
+	audioData, err := os.ReadFile(path)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read audio file")
+		return "failed"
+	}
+
+	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
+	log.Println("audio base 64")
+	log.Println(audioBase64)
+	return audioBase64
 }
 
 func getAudioHandler(c *gin.Context) {
@@ -31,6 +60,7 @@ func getAudioHandler(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
+	c.Writer.Flush()
 	conn, err := grpc.Dial(GEN_SERVICE_URL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		errMsg := "error dialing gen-service"
@@ -42,7 +72,7 @@ func getAudioHandler(c *gin.Context) {
 
 	client := gs.NewAudioCraftGenServiceClient(conn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2000)
 	defer cancel()
 
 	stream, err := client.GetAudioStream(ctx, &gs.GetAudioStreamRequest{Prompt: prompt})
@@ -70,15 +100,31 @@ func getAudioHandler(c *gin.Context) {
 			log.Println("Error writing to client:", err)
 			return
 		}
-		c.Writer.Flush()
-		time.Sleep(10)
-		if response.Progress == "Task completed" {
-			data := []byte("data: Here is your data\n\n")
+		str := response.Progress
+		index := strings.Index(str, ":")
+
+		if index != -1 {
+			c.Writer.Write([]byte("data: DONE!\n\n"))
+			path := str[index+1:]
+			log.Println("path = " + path)
+			path = strings.TrimSpace(path)
+			path = "../" + path
+			audio := streamAudio(path, c)
+			log.Println(audio)
+			data := []byte("data: audio: " + audio + "\n\n")
 			_, err = c.Writer.Write(data)
 			if err != nil {
 				log.Println("Error writing to client:", err)
 				return
 			}
+
+		}
+		c.Writer.Flush()
+		time.Sleep(10)
+		if response.GetMessage() != "" {
+			split := strings.Split(response.Message, ":")
+			file := split[len(split)-1]
+			streamAudio(file, c)
 			c.Writer.Flush()
 			return
 		}

@@ -4,6 +4,8 @@ go 1.21.5
 
 require (
 	github.com/gin-gonic/gin v1.9.1
+	github.com/gordonklaus/portaudio v0.0.0-20230709114228-aafa478834f5
+	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	google.golang.org/grpc v1.63.2
 	google.golang.org/protobuf v1.33.0
 )

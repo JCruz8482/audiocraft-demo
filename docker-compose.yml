@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  gen-service:
+    build:
+      context: ./gen-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+  demo-service:
+    build:
+      context: ./demo-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+
+networks:
+  backend:
