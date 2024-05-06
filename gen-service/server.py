@@ -112,7 +112,7 @@ def serve():
     # load_audio_model()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AudioCraftGenServiceServicer_to_server(GenService(), server)
-    server.add_insecure_port("[::]:9000")
+    server.add_insecure_port("0.0.0.0:9000")
     server.start()
     logging.info("Server started. Listening on port 9000")
 

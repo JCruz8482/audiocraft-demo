@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-const GEN_SERVICE_URL = "localhost:9000"
+const GEN_SERVICE_URL = "gen-service:9000"
 
 func main() {
 	router := gin.Default()
@@ -25,7 +25,7 @@ func main() {
 		c.File("./static/index.html")
 	})
 	router.GET("/progress", getAudioHandler)
-	router.Run("localhost:8080")
+	router.Run(":8080")
 }
 
 func streamAudioHandler(c *gin.Context) {
