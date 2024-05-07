@@ -1,7 +1,9 @@
 from concurrent import futures
+import os
 import uuid
 import time
 import logging
+import json
 import threading
 import signal
 import grpc
@@ -10,31 +12,53 @@ from gen_service_pb2_grpc import AudioCraftGenServiceServicer, \
     add_AudioCraftGenServiceServicer_to_server
 from audiocraft.models import AudioGen
 from audiocraft.data.audio import audio_write
+from botocore.exceptions import ClientError
 import torch
+import boto3
+
+AUDIO_FILES_PATH = os.getcwd() + '/audio/'
+AUDIO_BUCKET_NAME = 'audiocraft-demo-bucket'
+AWS_REGION = 'us-west-2'
+
+Session = boto3.session.Session()
+S3Client = Session.client(service_name='s3',
+                          region_name=AWS_REGION,
+                          endpoint_url='http://localhost:9000',
+                          aws_access_key_id='minioadmin',
+                          aws_secret_access_key='minioadmin')
+AudioBucket = None
+AudioModel = None
 
 
-AUDIO_MODEL = None
+def get_or_create_s3_bucket(bucket_name=AUDIO_BUCKET_NAME):
+    global AudioBucket
+    try:
+        S3Client.head_bucket(Bucket=bucket_name)
+    except S3Client.exceptions.ClientError:
+        S3Client.create_bucket(Bucket=bucket_name, ACL='public-read-write')
+
+    AudioBucket = boto3.resource('s3').Bucket(bucket_name)
 
 
 def load_audio_model(version='facebook/audiogen-medium'):
-    global AUDIO_MODEL
+    global AudioModel
     print("Loading model", version)
-    if AUDIO_MODEL is None or AUDIO_MODEL.name != version:
+    if AudioModel is None or AudioModel.name != version:
         print("loading new")
-        del AUDIO_MODEL
+        del AudioModel
         torch.cuda.empty_cache()
-        AUDIO_MODEL = None
-        AUDIO_MODEL = AudioGen.get_pretrained(version, 'cpu')
-        AUDIO_MODEL.set_generation_params(
+        AudioModel = None
+        AudioModel = AudioGen.get_pretrained(version, 'cpu')
+        AudioModel.set_generation_params(
             duration=3,
             top_k=1
         )
         print("model set\nGeneration params:\n")
-        print(AUDIO_MODEL.generation_params)
+        print(AudioModel.generation_params)
 
 
 def generateAudio(text: str):
-    return AUDIO_MODEL.generate(
+    return AudioModel.generate(
         descriptions=[text],
         progress=True
     )
@@ -48,7 +72,7 @@ def audioToFile(wav):
         audio_write(
             stem_name=name,
             wav=one_wav.cpu(),
-            sample_rate=AUDIO_MODEL.sample_rate,
+            sample_rate=AudioModel.sample_rate,
             format="mp3",
             strategy="loudness",
             loudness_compressor=True
@@ -65,14 +89,19 @@ class GenService(AudioCraftGenServiceServicer):
             yield result
 
     def generate(self, prompt):
-        filepaths = []
+        filenames = []
 
         def create_audio_file(prompt):
             time.sleep(5)
             # wav = generateAudio(prompt)
             # filepaths = audioToFile(wav)
-            filepaths.append("soul.mp3")
-            return
+            filename = "soul.mp3"
+            filenames.append(filename)
+            filepath = AUDIO_FILES_PATH + filename
+            try:
+                S3Client.upload_file(filepath, AUDIO_BUCKET_NAME, filename)
+            except ClientError as e:
+                logging.error(e)
 
         def loading_animation():
             symbols = ['-', '\\', '|', '/']
@@ -93,8 +122,8 @@ class GenService(AudioCraftGenServiceServicer):
         file_thread.join()
         yield GetAudioStreamResponse(progress="donezo")
 
-        if len(filepaths) != 0:
-            yield GetAudioStreamResponse(progress=f'filepath: {filepaths[0]}')
+        if len(filenames) != 0:
+            yield GetAudioStreamResponse(progress=f'object_key: {filenames[0]}')
         else:
             yield GetAudioStreamResponse(progress="Failed")
 
@@ -110,11 +139,13 @@ class CaptureOutput:
 
 def serve():
     # load_audio_model()
+    logging.info(os.getcwd() + '/audio')
+    get_or_create_s3_bucket()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AudioCraftGenServiceServicer_to_server(GenService(), server)
-    server.add_insecure_port("0.0.0.0:9000")
+    server.add_insecure_port("localhost:5000")
     server.start()
-    logging.info("Server started. Listening on port 9000")
+    logging.info("Server started. Listening on port 5000")
 
     signal.signal(signal.SIGTERM, lambda *_: server.stop(0))
     signal.signal(signal.SIGINT, lambda *_: server.stop(0))
