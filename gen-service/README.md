@@ -7,6 +7,8 @@ Backend gRPC service to generate audio effect from a prompt
 ```
 python3 -m venv venv
 source venv/bin/activate
+#windows
+.\venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 

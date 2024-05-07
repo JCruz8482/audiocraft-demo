@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError
 import torch
 import boto3
 
-AUDIO_FILES_PATH = os.getcwd() + '/audio/'
+AUDIO_FILES_PATH = os.getcwd() + '/audiofiles/'
 AUDIO_BUCKET_NAME = 'audiocraft-demo-bucket'
 AWS_REGION = 'us-west-2'
 
@@ -46,11 +46,12 @@ def load_audio_model(version='facebook/audiogen-medium'):
         print("loading new")
         del AudioModel
         torch.cuda.empty_cache()
+        print(torch.cuda.device_count())
         AudioModel = None
-        AudioModel = AudioGen.get_pretrained(version, 'cpu')
+        AudioModel = AudioGen.get_pretrained(version)
         AudioModel.set_generation_params(
-            duration=3,
-            top_k=1
+            duration=5,
+            top_k=250
         )
         print("model set\nGeneration params:\n")
         print(AudioModel.generation_params)
@@ -64,19 +65,19 @@ def generateAudio(text: str):
 
 
 def audioToFile(wav):
-    paths = []
+    names = []
     for idx, one_wav in enumerate(wav):
         name = str(uuid.uuid4())
-        paths.push(name + '.mp3')
+        names.append(name + '.mp3')
         audio_write(
-            stem_name=name,
+            stem_name=AUDIO_FILES_PATH + name,
             wav=one_wav.cpu(),
             sample_rate=AudioModel.sample_rate,
             format="mp3",
             strategy="loudness",
             loudness_compressor=True
         )
-    return paths
+    return names
 
 
 class GenService(AudioCraftGenServiceServicer):
@@ -91,10 +92,10 @@ class GenService(AudioCraftGenServiceServicer):
         filenames = []
 
         def create_audio_file(prompt):
-            time.sleep(5)
-            # wav = generateAudio(prompt)
-            # filepaths = audioToFile(wav)
-            filename = "soul.mp3"
+            wav = generateAudio(prompt)
+            names = audioToFile(wav)
+            # filename = "soul.mp3"
+            filename = names[0]
             filenames.append(filename)
             filepath = AUDIO_FILES_PATH + filename
             try:
@@ -136,7 +137,7 @@ class CaptureOutput:
 
 
 def serve():
-    # load_audio_model()
+    load_audio_model()
     get_or_create_s3_bucket()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AudioCraftGenServiceServicer_to_server(GenService(), server)

@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   minio:
     image: minio/minio
@@ -21,6 +19,13 @@ services:
       - "5000:5000"
     networks:
       - backend
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   demo-service:
     build:

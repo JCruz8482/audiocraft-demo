@@ -14,7 +14,9 @@ def load_audio_model(version='facebook/audiogen-medium'):
         del AUDIO_MODEL
         torch.cuda.empty_cache()
         AUDIO_MODEL = None
-        AUDIO_MODEL = AudioGen.get_pretrained(version, 'cpu')
+        print("cuda count")
+        print(torch.cuda.device_count())
+        AUDIO_MODEL = AudioGen.get_pretrained(version)
         AUDIO_MODEL.set_generation_params(
             duration=3,
             top_k=1
