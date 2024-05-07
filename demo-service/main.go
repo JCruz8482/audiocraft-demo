@@ -21,13 +21,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-const GEN_SERVICE_URL = "localhost:5000"
+const GEN_SERVICE_URL = "gen-service:8001"
 const AUDIO_BUCKET_NAME = "audiocraft-demo-bucket"
 const AWS_REGION = "us-west-2"
 
 var aws_session = session.Must(session.NewSession(&aws.Config{
 	Region:           aws.String(AWS_REGION),
-	Endpoint:         aws.String("http://localhost:9000"),
+	Endpoint:         aws.String("http://minio:9000"),
 	S3ForcePathStyle: aws.Bool(true),
 	Credentials: credentials.NewStaticCredentials(
 		"minioadmin",

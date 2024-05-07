@@ -22,7 +22,7 @@ AWS_REGION = 'us-west-2'
 Session = boto3.session.Session()
 S3Client = Session.client(service_name='s3',
                           region_name=AWS_REGION,
-                          endpoint_url='http://localhost:9000',
+                          endpoint_url='http://minio:9000',
                           aws_access_key_id='minioadmin',
                           aws_secret_access_key='minioadmin')
 AudioBucket = None
@@ -140,9 +140,9 @@ def serve():
     get_or_create_s3_bucket()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AudioCraftGenServiceServicer_to_server(GenService(), server)
-    server.add_insecure_port("localhost:5000")
+    server.add_insecure_port("0.0.0.0:8001")
     server.start()
-    logging.info("Server started. Listening on port 5000")
+    logging.info("Server started. Listening on port 8001")
 
     signal.signal(signal.SIGTERM, lambda *_: server.stop(0))
     signal.signal(signal.SIGINT, lambda *_: server.stop(0))

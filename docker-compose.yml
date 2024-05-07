@@ -1,12 +1,24 @@
 version: '3'
 
 services:
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+    volumes:
+      - ~/minio/audiocraft-demo:/data
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: server /data
+    networks:
+      - backend
   gen-service:
     build:
       context: ./gen-service
       dockerfile: Dockerfile
     ports:
-      - "9000:9000"
+      - "5000:5000"
     networks:
       - backend
 
