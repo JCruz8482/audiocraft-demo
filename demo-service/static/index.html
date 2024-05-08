@@ -2,22 +2,34 @@
 <html>
 
 <head>
-  <title>AudioCraft demo</title>
+  <title>sunidu-ai</title>
+  <link rel="stylesheet" type="text/css" href="static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:ital,wght@0,100..700;1,100..700&display=swap"
+    rel="stylesheet">
 </head>
 
 <body>
-  <form id="audioForm">
-    <label for="prompt">Enter Prompt:</label><br>
-    <input type="text" id="prompt" name="prompt"><br><br>
-    <button type="submit">Submit</button>
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.5.0/dist/htmx.min.js"></script>
-  </form>
+  <div class="container">
+    <h1>make noise</h1>
+    <form id="audioForm">
+      <input id="prompt" type="text" name="prompt" placeholder="elephant trumpeting">
+      <input id="btn" type="submit" value="generate">
+    </form>
 
-  <div id="progress"></div>
-  <div id="result" style="display:none;"></div>
+    <div id="audioPlayer">
+      <br><br><br>
+    </div>
 
-  <div id="audioPlayer"></div>
-  <script src="/static/main.js"></script>
+    <footer id="footer">
+      <a href="https://github.com/jcruz8482/audiocraft-demo">source code</a>
+    </footer>
+  </div>
 </body>
+
+
+
+<script src="/static/main.js"></script>
 
 </html>

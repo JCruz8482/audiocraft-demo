@@ -3,7 +3,6 @@ import os
 import uuid
 import time
 import logging
-import json
 import threading
 import signal
 import grpc
@@ -108,7 +107,7 @@ class GenService(AudioCraftGenServiceServicer):
             idx = 0
             while file_thread.is_alive():
                 yield GetAudioStreamResponse(
-                    progress=f"Generating... {symbols[idx]}")
+                    progress=f"{symbols[idx]}")
                 idx = (idx + 1) % len(symbols)
                 time.sleep(0.1)
 
@@ -120,12 +119,11 @@ class GenService(AudioCraftGenServiceServicer):
             yield update
 
         file_thread.join()
-        yield GetAudioStreamResponse(progress="donezo")
 
         if len(filenames) != 0:
             yield GetAudioStreamResponse(progress=f'object_key: {filenames[0]}')
         else:
-            yield GetAudioStreamResponse(progress="Failed")
+            yield GetAudioStreamResponse(progress="uh oh, failed to generate")
 
 
 class CaptureOutput:
@@ -139,7 +137,6 @@ class CaptureOutput:
 
 def serve():
     # load_audio_model()
-    logging.info(os.getcwd() + '/audio')
     get_or_create_s3_bucket()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AudioCraftGenServiceServicer_to_server(GenService(), server)

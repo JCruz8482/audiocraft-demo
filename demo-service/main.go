@@ -54,8 +54,6 @@ func streamAudio(path string, c *gin.Context) string {
 	}
 
 	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
-	log.Println("audio base 64")
-	log.Println(audioBase64)
 	return audioBase64
 }
 
@@ -152,7 +150,6 @@ func getAudioHandler(c *gin.Context) {
 			path = strings.TrimSpace(path)
 			path = "../" + path
 			audio := streamAudio(path, c)
-			log.Println(audio)
 			data := []byte("data: audio: " + audio + "\n\n")
 			_, err = c.Writer.Write(data)
 			if err != nil {
