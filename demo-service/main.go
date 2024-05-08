@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -25,6 +26,8 @@ const GEN_SERVICE_URL = "localhost:5000"
 const AUDIO_BUCKET_NAME = "audiocraft-demo-bucket"
 const AWS_REGION = "us-west-2"
 
+var ERROR = errors.New("uh oh. failed to generate audio")
+
 var aws_session = session.Must(session.NewSession(&aws.Config{
 	Region:           aws.String(AWS_REGION),
 	Endpoint:         aws.String("http://localhost:9000"),
@@ -42,26 +45,25 @@ func main() {
 	router.GET("/", func(c *gin.Context) {
 		c.File("./static/index.html")
 	})
-	router.GET("/progress", getAudioHandler)
+	router.GET("/generateAudio", generateAudio)
 	router.Run(":8080")
 }
 
-func streamAudio(path string, c *gin.Context) string {
+func streamAudio(path string, c *gin.Context) (string, error) {
 	audioData, err := os.ReadFile(path)
 	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to read audio file")
-		return "failed"
+		log.Printf("Failed to read audio file %v", err)
+		return "", ERROR
 	}
-
 	audioBase64 := base64.StdEncoding.EncodeToString(audioData)
-	return audioBase64
+	return audioBase64, nil
 }
 
-func downloadS3(objectKey string) string {
+func downloadS3(objectKey string) (string, error) {
 	file, err := os.Create(objectKey)
 	if err != nil {
 		log.Printf("Unable to open file %q, %v", objectKey, err)
-		return ""
+		return "", ERROR
 	}
 	defer file.Close()
 
@@ -75,22 +77,25 @@ func downloadS3(objectKey string) string {
 		})
 	if err != nil {
 		log.Printf("failed to download: %v", err)
-		return ""
+		return "", ERROR
 	}
-	return file.Name()
+	return file.Name(), nil
 }
 
-func getAudioHandler(c *gin.Context) {
+func generateAudio(c *gin.Context) {
 	prompt := c.Query("prompt")
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Writer.Flush()
+
 	conn, err := grpc.Dial(GEN_SERVICE_URL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		errMsg := "error dialing gen-service"
 		log.Printf("%s%v", errMsg, err)
+		c.Header("Content-Type", "text/event-stream")
 		c.IndentedJSON(http.StatusInternalServerError, errMsg)
+		c.Writer.Flush()
 		return
 	}
 	defer conn.Close()
@@ -110,7 +115,7 @@ func getAudioHandler(c *gin.Context) {
 	for {
 		response, err := stream.Recv()
 		if err == io.EOF {
-			break
+			return
 		}
 
 		if err != nil {
@@ -123,8 +128,11 @@ func getAudioHandler(c *gin.Context) {
 		if strings.HasPrefix(progress, "object_key:") {
 			s3Object := strings.SplitN(progress, ":", 2)[1]
 			s3Object = strings.TrimSpace(s3Object)
-			filename := downloadS3(s3Object)
-			audio := streamAudio(filename, c)
+			filename, err := downloadS3(s3Object)
+			if err != nil {
+				c.Request.Close = true
+			}
+			audio, err := streamAudio(filename, c)
 			data := []byte("data: audio: " + audio + "\n\n")
 			_, err = c.Writer.Write(data)
 			if err != nil {
@@ -149,14 +157,13 @@ func getAudioHandler(c *gin.Context) {
 			log.Println("path = " + path)
 			path = strings.TrimSpace(path)
 			path = "../" + path
-			audio := streamAudio(path, c)
+			audio, err := streamAudio(path, c)
 			data := []byte("data: audio: " + audio + "\n\n")
 			_, err = c.Writer.Write(data)
 			if err != nil {
 				log.Println("Error writing to client:", err)
 				return
 			}
-
 		}
 		c.Writer.Flush()
 		time.Sleep(10)
