@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JCruz8482/audiocraft-demo/demo-service/auth"
+	"github.com/JCruz8482/audiocraft-demo/demo-service/db"
 	gs "github.com/JCruz8482/audiocraft-demo/demo-service/gen_service"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -18,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -40,16 +44,66 @@ var aws_session = session.Must(session.NewSession(&aws.Config{
 }))
 
 func main() {
+	if os.Getenv("APP_ENV") == "development" {
+		godotenv.Load()
+	}
+	err := db.InitializeDB()
+	if err != nil {
+		fmt.Println("could not initialize db")
+	}
+
 	router := gin.Default()
 	router.Static("/static", "./static")
 	router.GET("/", func(c *gin.Context) {
 		c.File("./static/index.html")
 	})
+	router.GET("/login", func(c *gin.Context) {
+		c.File("./static/login.html")
+	})
+	router.GET("/signup", func(c *gin.Context) {
+		c.File("./static/signup.html")
+	})
+	router.POST("/login", loginHandler)
+	router.POST("/signup", signUpHandler)
 	router.GET("/generateAudio", generateAudio)
 	router.Run(":8080")
 }
 
-func streamAudio(path string, c *gin.Context) (string, error) {
+type LoginForm struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func loginHandler(c *gin.Context) {
+	var user LoginForm
+
+	if err := c.BindJSON(&user); err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, err)
+		return
+	}
+	isLoggedIn, err := auth.Login(context.Background(), user.Email, user.Password)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, err)
+		return
+	}
+	c.IndentedJSON(http.StatusOK, isLoggedIn)
+}
+
+func signUpHandler(c *gin.Context) {
+	var user LoginForm
+	if err := c.BindJSON(&user); err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, err)
+		return
+	}
+	ok, err := auth.SignUp(context.Background(), user.Email, user.Password)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, err)
+		return
+	}
+	c.IndentedJSON(http.StatusOK, ok)
+}
+
+func encodeAudio(path string) (string, error) {
 	audioData, err := os.ReadFile(path)
 	if err != nil {
 		log.Printf("Failed to read audio file %v", err)
@@ -132,47 +186,28 @@ func generateAudio(c *gin.Context) {
 			if err != nil {
 				c.Request.Close = true
 			}
-			audio, err := streamAudio(filename, c)
-			data := []byte("data: audio: " + audio + "\n\n")
+			audio, err := encodeAudio(filename)
+			data := []byte("data: { \"audio\": \"" + audio + "\"}\n\n")
 			_, err = c.Writer.Write(data)
 			if err != nil {
 				log.Printf("failed to write audio data to stream: %v", err)
+				return
 			}
 			c.Writer.Flush()
 			return
 		}
 
-		data := []byte("data: " + response.Progress + "\n\n")
+		if response.Progress == "\"" {
+			progress = "\\"
+		} else {
+			progress = response.Progress
+		}
+		data := []byte(fmt.Sprintf("data: { \"progress\": \"%s\" }\n\n", progress))
 		_, err = c.Writer.Write(data)
 		if err != nil {
 			log.Println("Error writing to client:", err)
 			return
 		}
-		str := response.Progress
-		index := strings.Index(str, ":")
-
-		if index != -1 {
-			c.Writer.Write([]byte("data: DONE!\n\n"))
-			path := str[index+1:]
-			log.Println("path = " + path)
-			path = strings.TrimSpace(path)
-			path = "../" + path
-			audio, err := streamAudio(path, c)
-			data := []byte("data: audio: " + audio + "\n\n")
-			_, err = c.Writer.Write(data)
-			if err != nil {
-				log.Println("Error writing to client:", err)
-				return
-			}
-		}
 		c.Writer.Flush()
-		time.Sleep(10)
-		if response.GetMessage() != "" {
-			split := strings.Split(response.Message, ":")
-			file := split[len(split)-1]
-			streamAudio(file, c)
-			c.Writer.Flush()
-			return
-		}
 	}
 }
