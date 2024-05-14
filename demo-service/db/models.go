@@ -4,8 +4,14 @@
 
 package db
 
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
 type UserAccount struct {
-	ID       int32
-	Email    string
-	Hashword string
+	ID        pgtype.UUID
+	Email     string
+	Hashword  string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }

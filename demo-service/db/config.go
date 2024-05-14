@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/jackc/pgx/v5"
@@ -9,14 +10,18 @@ import (
 
 var DB *Queries
 
-func InitializeDB() error {
-	ctx := context.Background()
+func InitializeDB(ctx context.Context) (*pgx.Conn, error) {
 	conn, err := pgx.Connect(ctx, os.Getenv("DATABASE_URL"))
+
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer conn.Close(ctx)
+
+	if err := conn.Ping(ctx); err != nil {
+		conn.Close(ctx)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
 
 	DB = New(conn)
-	return nil
+	return conn, nil
 }

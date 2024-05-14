@@ -44,29 +44,39 @@ var aws_session = session.Must(session.NewSession(&aws.Config{
 }))
 
 func main() {
-	if os.Getenv("APP_ENV") == "development" {
-		godotenv.Load()
-	}
-	err := db.InitializeDB()
+	godotenv.Load()
+	ctx := context.Background()
+	conn, err := db.InitializeDB(ctx)
 	if err != nil {
-		fmt.Println("could not initialize db")
+		log.Fatal(err)
 	}
+	defer conn.Close(ctx)
+	log.Print("Initialized DB")
+	err = auth.InitializeSessionManager()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer auth.SessionManager.Close()
 
-	router := gin.Default()
-	router.Static("/static", "./static")
-	router.GET("/", func(c *gin.Context) {
+	r := gin.Default()
+	r.Use(gin.Logger())
+
+	r.Static("/static", "./static")
+	r.GET("/", func(c *gin.Context) {
 		c.File("./static/index.html")
 	})
-	router.GET("/login", func(c *gin.Context) {
+	r.GET("/login", func(c *gin.Context) {
 		c.File("./static/login.html")
 	})
-	router.GET("/signup", func(c *gin.Context) {
+	r.GET("/signup", func(c *gin.Context) {
 		c.File("./static/signup.html")
 	})
-	router.POST("/login", loginHandler)
-	router.POST("/signup", signUpHandler)
-	router.GET("/generateAudio", generateAudio)
-	router.Run(":8080")
+	r.POST("/login", loginHandler)
+	r.POST("/signup", signUpHandler)
+	r.Use(auth.AuthHandler)
+	r.GET("/hello", func(c *gin.Context) { c.IndentedJSON(http.StatusAccepted, "hello world") })
+	r.GET("/generateAudio", generateAudio)
+	r.Run(":8080")
 }
 
 type LoginForm struct {
@@ -78,29 +88,39 @@ func loginHandler(c *gin.Context) {
 	var user LoginForm
 
 	if err := c.BindJSON(&user); err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, err)
+		log.Println("aw shit")
+		log.Println(err)
+		c.JSON(http.StatusInternalServerError, err)
 		return
 	}
-	isLoggedIn, err := auth.Login(context.Background(), user.Email, user.Password)
+	token, err := auth.Login(context.Background(), user.Email, user.Password)
 	if err != nil {
-		c.IndentedJSON(http.StatusInternalServerError, err)
+		log.Println("fuck")
+		log.Println(err)
+		c.IndentedJSON(http.StatusNotFound, "user not found")
 		return
 	}
-	c.IndentedJSON(http.StatusOK, isLoggedIn)
+	jsonn := fmt.Sprintf(`{"sessionKey":"%s"}`, token)
+	log.Println(jsonn)
+	log.Println("returning")
+	c.IndentedJSON(http.StatusOK, jsonn)
 }
 
 func signUpHandler(c *gin.Context) {
 	var user LoginForm
 	if err := c.BindJSON(&user); err != nil {
+		fmt.Println(err)
 		c.IndentedJSON(http.StatusInternalServerError, err)
 		return
 	}
-	ok, err := auth.SignUp(context.Background(), user.Email, user.Password)
+	userAccount, err := auth.SignUp(context.Background(), user.Email, user.Password)
 	if err != nil {
+
+		fmt.Println(err)
 		c.IndentedJSON(http.StatusInternalServerError, err)
 		return
 	}
-	c.IndentedJSON(http.StatusOK, ok)
+	c.IndentedJSON(http.StatusOK, userAccount)
 }
 
 func encodeAudio(path string) (string, error) {
