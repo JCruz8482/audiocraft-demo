@@ -13,19 +13,13 @@ import (
 
 func AuthHandler(c *gin.Context) {
 	bearerAuth := c.GetHeader("Authorization")
-	log.Print("headder = ")
-	log.Println(bearerAuth)
 	token := strings.Split(bearerAuth, " ")
-	log.Print("token from header: ")
-	log.Println(token)
-	log.Println("indexed")
-	log.Print(token[1])
 	id, err := SessionManager.UserIdForSession(context.Background(), token[1])
 	if err != nil {
 		c.JSON(401, "no user logged in")
-		// redirect to login page
+		// TODO redirect to login page
 		log.Println("error getting id for session")
-		return
+		c.Abort()
 	}
 
 	log.Print("user id = ")
@@ -53,8 +47,7 @@ func Login(
 		return "", errors.New("Passwords did not match")
 	}
 
-	id := account.ID.Bytes
-	token, err := SessionManager.NewSession(ctx, string(id[:]))
+	token, err := SessionManager.NewSession(ctx, account.ID)
 	if err != nil {
 		return "", err
 	}

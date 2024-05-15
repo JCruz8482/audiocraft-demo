@@ -19,8 +19,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -30,18 +30,27 @@ const GEN_SERVICE_URL = "localhost:5000"
 const AUDIO_BUCKET_NAME = "audiocraft-demo-bucket"
 const AWS_REGION = "us-west-2"
 
-var ERROR = errors.New("uh oh. failed to generate audio")
+type Task struct {
+	Status Status
+	Data   string
+}
 
-var aws_session = session.Must(session.NewSession(&aws.Config{
-	Region:           aws.String(AWS_REGION),
-	Endpoint:         aws.String("http://localhost:9000"),
-	S3ForcePathStyle: aws.Bool(true),
-	Credentials: credentials.NewStaticCredentials(
-		"minioadmin",
-		"minioadmin",
-		"",
-	),
-}))
+var (
+	ERROR = errors.New("uh oh. failed to generate audio")
+
+	aws_session *session.Session
+	s3Client    *s3.S3
+
+	taskMap = make(map[uuid.UUID]chan Task)
+)
+
+type Status string
+
+const (
+	Processing Status = "Processing"
+	Done       Status = "Done"
+	Error      Status = "Error"
+)
 
 func main() {
 	godotenv.Load()
@@ -58,12 +67,24 @@ func main() {
 	}
 	defer auth.SessionManager.Close()
 
+	aws_session = session.Must(session.NewSession(&aws.Config{
+		Region:           aws.String(AWS_REGION),
+		Endpoint:         aws.String("http://localhost:9000"),
+		S3ForcePathStyle: aws.Bool(true),
+		Credentials: credentials.NewStaticCredentials(
+			os.Getenv("AWS_ACCESS_KEY_ID"),
+			os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			"",
+		)}))
+	s3Client = s3.New(aws_session)
+
 	r := gin.Default()
 	r.Use(gin.Logger())
-
+	log.Println(os.Getenv("AWS_ACCESS_KEY_ID"))
 	r.Static("/static", "./static")
+	r.LoadHTMLGlob("views/*.html")
 	r.GET("/", func(c *gin.Context) {
-		c.File("./static/index.html")
+		c.HTML(200, "gen", gin.H{})
 	})
 	r.GET("/login", func(c *gin.Context) {
 		c.File("./static/login.html")
@@ -73,9 +94,11 @@ func main() {
 	})
 	r.POST("/login", loginHandler)
 	r.POST("/signup", signUpHandler)
-	r.Use(auth.AuthHandler)
 	r.GET("/hello", func(c *gin.Context) { c.IndentedJSON(http.StatusAccepted, "hello world") })
-	r.GET("/generateAudio", generateAudio)
+	r.POST("/generateAudio", postGenerateAudio)
+	r.GET("/generateAudio/:id", getGenerateAudio)
+
+	//r.Use(auth.AuthHandler)
 	r.Run(":8080")
 }
 
@@ -84,26 +107,26 @@ type LoginForm struct {
 	Password string `json:"password"`
 }
 
+type GenerateAudioReq struct {
+	Prompt string `json:"prompt"`
+}
+
 func loginHandler(c *gin.Context) {
 	var user LoginForm
 
 	if err := c.BindJSON(&user); err != nil {
-		log.Println("aw shit")
 		log.Println(err)
 		c.JSON(http.StatusInternalServerError, err)
 		return
 	}
-	token, err := auth.Login(context.Background(), user.Email, user.Password)
+	sessionKey, err := auth.Login(context.Background(), user.Email, user.Password)
 	if err != nil {
-		log.Println("fuck")
 		log.Println(err)
 		c.IndentedJSON(http.StatusNotFound, "user not found")
 		return
 	}
-	jsonn := fmt.Sprintf(`{"sessionKey":"%s"}`, token)
-	log.Println(jsonn)
-	log.Println("returning")
-	c.IndentedJSON(http.StatusOK, jsonn)
+
+	c.IndentedJSON(http.StatusOK, fmt.Sprintf(`{"sessionKey":"%s"}`, sessionKey))
 }
 
 func signUpHandler(c *gin.Context) {
@@ -133,43 +156,90 @@ func encodeAudio(path string) (string, error) {
 	return audioBase64, nil
 }
 
-func downloadS3(objectKey string) (string, error) {
-	file, err := os.Create(objectKey)
-	if err != nil {
-		log.Printf("Unable to open file %q, %v", objectKey, err)
-		return "", ERROR
-	}
-	defer file.Close()
+func getPresignedUrl(objectKey string) (string, error) {
+	req, _ := s3Client.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: aws.String(AUDIO_BUCKET_NAME),
+		Key:    aws.String(objectKey),
+	})
+	url, err := req.Presign(15 * time.Minute)
 
-	downloader := s3manager.NewDownloader(aws_session)
-	log.Println(objectKey)
-	log.Println(AUDIO_BUCKET_NAME)
-	_, err = downloader.Download(file,
-		&s3.GetObjectInput{
-			Bucket: aws.String(AUDIO_BUCKET_NAME),
-			Key:    aws.String(objectKey),
-		})
 	if err != nil {
-		log.Printf("failed to download: %v", err)
-		return "", ERROR
+		return "", err
 	}
-	return file.Name(), nil
+
+	log.Println("The URL is", url)
+	return url, nil
 }
 
-func generateAudio(c *gin.Context) {
-	prompt := c.Query("prompt")
+type GenAudioResponse struct {
+	ID     string `json:"id"`
+	Data   string `json:"data"`
+	Status Status `json:"status"`
+	Error  string `json:"error"`
+}
+
+func postGenerateAudio(c *gin.Context) {
+	var req GenerateAudioReq
+
+	if err := c.BindJSON(&req); err != nil {
+		c.Abort()
+		return
+	}
+
+	prompt := req.Prompt
+	id := uuid.New()
+
+	taskChan := make(chan Task, 10)
+	taskMap[id] = taskChan
+
+	go generateAudio(id.String(), prompt, taskChan)
+
+	c.IndentedJSON(200, GenAudioResponse{ID: id.String()})
+}
+
+func getGenerateAudio(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Writer.Flush()
+	c.Header("Charset", "utf-8")
+
+	id := c.Param("id")
+
+	err := uuid.Validate(id)
+	if err != nil {
+		c.JSON(404, GenAudioResponse{Error: "ID not found"})
+		return
+	}
+
+	uuid, err := uuid.Parse(id)
+	if err != nil {
+		c.JSON(404, GenAudioResponse{Error: "ID not found"})
+		return
+	}
+
+	ch, ok := taskMap[uuid]
+	if !ok {
+		c.JSON(404, GenAudioResponse{Error: "ID not found"})
+		return
+	}
+
+	for task := range ch {
+		c.SSEvent("", GenAudioResponse{
+			ID:     id,
+			Status: task.Status,
+			Data:   task.Data,
+		})
+		c.Writer.Flush()
+	}
+}
+
+func generateAudio(id string, prompt string, taskChan chan Task) {
+	defer close(taskChan)
 
 	conn, err := grpc.Dial(GEN_SERVICE_URL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		errMsg := "error dialing gen-service"
-		log.Printf("%s%v", errMsg, err)
-		c.Header("Content-Type", "text/event-stream")
-		c.IndentedJSON(http.StatusInternalServerError, errMsg)
-		c.Writer.Flush()
+		log.Printf("error dialing gen-service for task id: %s, err: %v", id, err)
+		taskChan <- Task{Status: Error}
 		return
 	}
 	defer conn.Close()
@@ -180,54 +250,57 @@ func generateAudio(c *gin.Context) {
 	defer cancel()
 
 	stream, err := client.GetAudioStream(ctx, &gs.GetAudioStreamRequest{Prompt: prompt})
+
 	if err != nil {
-		log.Printf("failed to call gen-service: %v", err)
-		c.IndentedJSON(http.StatusInternalServerError, err)
+		log.Printf("failed to call gen-service for task id: %s, err: %v", id, err)
+		taskChan <- Task{Status: Error}
 		return
 	}
 
 	for {
 		response, err := stream.Recv()
 		if err == io.EOF {
+			log.Println("EOF reached in stream")
 			return
 		}
 
 		if err != nil {
 			log.Printf("Failed to receive response stream data: %v", err)
-			c.IndentedJSON(http.StatusInternalServerError, err)
-			return
-		}
-		progress := response.Progress
-		log.Printf("Received: %s", progress)
-		if strings.HasPrefix(progress, "object_key:") {
-			s3Object := strings.SplitN(progress, ":", 2)[1]
-			s3Object = strings.TrimSpace(s3Object)
-			filename, err := downloadS3(s3Object)
-			if err != nil {
-				c.Request.Close = true
-			}
-			audio, err := encodeAudio(filename)
-			data := []byte("data: { \"audio\": \"" + audio + "\"}\n\n")
-			_, err = c.Writer.Write(data)
-			if err != nil {
-				log.Printf("failed to write audio data to stream: %v", err)
-				return
-			}
-			c.Writer.Flush()
+			/*
+				c.SSEvent("", GenAudioResponse{
+					ID:     id,
+					Status: Error,
+					Error:  "Failed to generate audio",
+				})*/
 			return
 		}
 
-		if response.Progress == "\"" {
-			progress = "\\"
-		} else {
-			progress = response.Progress
-		}
-		data := []byte(fmt.Sprintf("data: { \"progress\": \"%s\" }\n\n", progress))
-		_, err = c.Writer.Write(data)
-		if err != nil {
-			log.Println("Error writing to client:", err)
+		progress := response.Progress
+		log.Println(progress)
+		if strings.HasPrefix(progress, "object_key:") {
+			s3Object := strings.SplitN(progress, ":", 2)[1]
+			s3Object = strings.TrimSpace(s3Object)
+
+			url, err := getPresignedUrl(s3Object)
+			if err != nil {
+				log.Printf("Error generating presigned url %v", err)
+				/*
+					c.SSEvent("", GenAudioResponse{
+						ID:     id,
+						Status: Error,
+						Error:  "Failed to generate audio",
+					})
+				*/
+				return
+			}
+
+			taskChan <- Task{
+				Status: Done,
+				Data:   url,
+			}
 			return
 		}
-		c.Writer.Flush()
+
+		taskChan <- Task{Status: Processing}
 	}
 }

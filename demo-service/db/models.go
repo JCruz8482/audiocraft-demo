@@ -9,7 +9,7 @@ import (
 )
 
 type UserAccount struct {
-	ID        pgtype.UUID
+	ID        int32
 	Email     string
 	Hashword  string
 	CreatedAt pgtype.Timestamptz

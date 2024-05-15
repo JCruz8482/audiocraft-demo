@@ -1,3 +1,4 @@
+import config
 from concurrent import futures
 import os
 import uuid
@@ -15,6 +16,7 @@ from botocore.exceptions import ClientError
 import torch
 import boto3
 
+
 AUDIO_FILES_PATH = os.getcwd() + '/audio/'
 AUDIO_BUCKET_NAME = 'audiocraft-demo-bucket'
 AWS_REGION = 'us-west-2'
@@ -23,20 +25,17 @@ Session = boto3.session.Session()
 S3Client = Session.client(service_name='s3',
                           region_name=AWS_REGION,
                           endpoint_url='http://localhost:9000',
-                          aws_access_key_id='minioadmin',
-                          aws_secret_access_key='minioadmin')
-AudioBucket = None
+                          aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+                          aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY)
 AudioModel = None
 
 
 def get_or_create_s3_bucket(bucket_name=AUDIO_BUCKET_NAME):
-    global AudioBucket
     try:
         S3Client.head_bucket(Bucket=bucket_name)
     except S3Client.exceptions.ClientError:
-        S3Client.create_bucket(Bucket=bucket_name, ACL='public-read-write')
-
-    AudioBucket = boto3.resource('s3').Bucket(bucket_name)
+        S3Client.create_bucket(
+            Bucket=bucket_name, ACL='public-read-write')
 
 
 def load_audio_model(version='facebook/audiogen-medium'):
@@ -54,13 +53,6 @@ def load_audio_model(version='facebook/audiogen-medium'):
         )
         print("model set\nGeneration params:\n")
         print(AudioModel.generation_params)
-
-
-def generateAudio(text: str):
-    return AudioModel.generate(
-        descriptions=[text],
-        progress=True
-    )
 
 
 def audioToFile(wav):
@@ -83,7 +75,7 @@ class GenService(AudioCraftGenServiceServicer):
     def GetAudioStream(self, request, context):
         prompt = request.prompt
         logging.info("Received prompt: %s", prompt)
-        yield GetAudioStreamResponse(progress="Generating audio")
+        yield GetAudioStreamResponse(progress="Processing")
         for result in self.generate(prompt):
             yield result
 
@@ -92,47 +84,33 @@ class GenService(AudioCraftGenServiceServicer):
 
         def create_audio_file(prompt):
             time.sleep(5)
-            # wav = generateAudio(prompt)
+            # wav = AudioModel.generate(descriptions=[prompt])
             # filepaths = audioToFile(wav)
             filename = "soul.mp3"
             filenames.append(filename)
             filepath = AUDIO_FILES_PATH + filename
             try:
-                S3Client.upload_file(filepath, AUDIO_BUCKET_NAME, filename)
+                S3Client.upload_file(
+                    filepath, AUDIO_BUCKET_NAME, filename)
             except ClientError as e:
                 logging.error(e)
-
-        def loading_animation():
-            symbols = ['-', '\\', '|', '/']
-            idx = 0
-            while file_thread.is_alive():
-                yield GetAudioStreamResponse(
-                    progress=f"{symbols[idx]}")
-                idx = (idx + 1) % len(symbols)
-                time.sleep(0.1)
 
         file_thread = threading.Thread(
             target=create_audio_file, args=(prompt,))
         file_thread.start()
 
-        for update in loading_animation():
-            yield update
+        while file_thread.is_alive():
+            yield GetAudioStreamResponse(progress="Processing")
+            time.sleep(1)
 
         file_thread.join()
 
         if len(filenames) != 0:
+            logging.info(f'returning {filenames[0]}')
             yield GetAudioStreamResponse(progress=f'object_key: {filenames[0]}')
         else:
+            logging.info("returning failure")
             yield GetAudioStreamResponse(progress="uh oh, failed to generate")
-
-
-class CaptureOutput:
-    def __init__(self):
-        self.buffer = []
-
-    def write(self, output):
-        for line in output.rstrip().split('\n'):
-            yield GetAudioStreamResponse(progress=f"data: {line}\n\n")
 
 
 def serve():
